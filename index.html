@@ -738,7 +738,23 @@ async function analyzeAndSave() {
     if (!resp.ok) { const err = await resp.json(); throw new Error(err.error?.message || `HTTP ${resp.status}`); }
     const data = await resp.json();
     const raw   = data.content.find(b => b.type === 'text')?.text || '{}';
-    extracted   = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    console.log('=== CLAUDE RAW JSON ===', raw);
+    const cleanRaw = raw.replace(/```json|```/g, '').trim();
+    extracted   = JSON.parse(cleanRaw);
+    // Normalizza separatori: converti virgole in | nei campi presidio
+    // (Claude a volte usa virgola invece di | nonostante le istruzioni)
+    const campiPresidio = ['presidio_prescritto','codice_presidio','quantita','prezzo_unitario','iva_percentuale','importo','importo_iva'];
+    campiPresidio.forEach(campo => {
+      if (extracted[campo] && typeof extracted[campo] === 'string') {
+        // Se il campo contiene virgole MA non contiene | → converti virgole in |
+        // ATTENZIONE: le descrizioni presidio contengono virgole normali nel testo
+        // quindi convertiamo SOLO codice_presidio (che ha solo numeri e virgole)
+        if (campo === 'codice_presidio') {
+          extracted[campo] = extracted[campo].replace(/,\s*/g, '|');
+        }
+      }
+    });
+    console.log('=== EXTRACTED ===', JSON.stringify(extracted, null, 2));
     showStatus('✅ Campi estratti correttamente.', 'success');
   } catch (err) {
     showStatus('❌ Errore analisi: ' + err.message, 'error');
@@ -779,7 +795,7 @@ async function saveToSheets(url, data) {
 
   const voci = [];
 
-  // Diagnosi (campo singolo)
+  // Diagnosi
   if (data.diagnosi || data.cod_diagnosi) {
     voci.push({
       tipo: "DIAGNOSI",
@@ -788,33 +804,41 @@ async function saveToSheets(url, data) {
     });
   }
 
-  // Presidi: espandi i campi separati da |
-  if (data.presidio_prescritto) {
-    const presidi    = (data.presidio_prescritto || "").split("|").map(s => s.trim());
-    const codici     = (data.codice_presidio     || "").split("|").map(s => s.trim());
-    const qtaArr     = (data.quantita            || "").split("|").map(s => s.trim());
-    const prezzi     = (data.prezzo_unitario     || "").split("|").map(s => s.trim());
-    const ivaArr     = (data.iva_percentuale     || "").split("|").map(s => s.trim());
-    const importi    = (data.importo             || "").split("|").map(s => s.trim());
-    const importiIva = (data.importo_iva         || "").split("|").map(s => s.trim());
+  // Presidi: usa codice_presidio come riferimento per il numero di voci
+  if (data.presidio_prescritto || data.codice_presidio) {
+    // Split su | oppure su virgola (fallback se Claude usa virgola)
+    const splitVal = v => v ? v.split(/\|/).map(s => s.trim()).filter(s => s) : [];
+    const splitCod = v => v ? v.split(/[|,]/).map(s => s.trim()).filter(s => s) : [];
 
-    for (let i = 0; i < presidi.length; i++) {
-      if (!presidi[i]) continue;
+    const presidi    = splitVal(data.presidio_prescritto);
+    const codici     = splitCod(data.codice_presidio);
+    const qtaArr     = splitVal(data.quantita);
+    const prezzi     = splitVal(data.prezzo_unitario);
+    const ivaArr     = splitVal(data.iva_percentuale);
+    const importiArr = splitVal(data.importo);
+    const ivaImpArr  = splitVal(data.importo_iva);
+
+    // Usa il numero di codici come riferimento (è il più affidabile)
+    const nVoci = Math.max(codici.length, presidi.length, 1);
+
+    for (let i = 0; i < nVoci; i++) {
       voci.push({
         tipo: "PRESIDIO",
-        presidio_prescritto: presidi[i],
+        presidio_prescritto: presidi[i]    || presidi[0]    || "",
         codice_presidio:     codici[i]     || "",
-        quantita:            qtaArr[i]     || "",
+        quantita:            qtaArr[i]     || qtaArr[0]     || "1",
         nome_commerciale:    "",
-        prezzo_unitario:     prezzi[i]     || "",
-        iva_percentuale:     ivaArr[i]     || "",
-        importo:             importi[i]    || "",
-        importo_iva:         importiIva[i] || "",
+        prezzo_unitario:     prezzi[i]     || prezzi[0]     || "",
+        iva_percentuale:     ivaArr[i]     || ivaArr[0]     || "",
+        importo:             importiArr[i] || importiArr[0] || "",
+        importo_iva:         ivaImpArr[i]  || ivaImpArr[0]  || "",
         collaudo:            data.collaudo   || "",
         televisita:          data.televisita || ""
       });
     }
   }
+
+  console.log('voci da inviare:', JSON.stringify(voci, null, 2));
 
   await fetch(url, {
     method: "POST", mode: "no-cors",
