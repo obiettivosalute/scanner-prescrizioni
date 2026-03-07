@@ -626,17 +626,12 @@ function checkReady() {
 }
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Sei un sistema OCR specializzato per moduli di prescrizione protesica della Regione Lombardia (ASST).
+const SYSTEM_PROMPT = `Sei un sistema OCR per moduli di prescrizione protesica della Regione Lombardia (ASST).
+Le immagini sono le PAGINE DI UN UNICO DOCUMENTO stampato su più fogli. Analizzale tutte insieme.
 
-Le immagini che ricevi rappresentano le PAGINE DI UN UNICO DOCUMENTO (prescrizione stampata su più fogli).
-Analizzale TUTTE insieme come se fossero un documento unico continuo.
+Restituisci SOLO un oggetto JSON valido, senza markdown, senza backtick, senza testo aggiuntivo.
 
-REGOLE FONDAMENTALI:
-1. I dati anagrafici (paziente, medico, numero pratica) si trovano solitamente nella PRIMA pagina.
-2. L'elenco dei PRESIDI può continuare nelle pagine successive — devi raccoglierli TUTTI da TUTTE le pagine.
-3. Restituisci SEMPRE e SOLO un singolo oggetto JSON valido, senza markdown, senza backtick.
-
-Struttura JSON da restituire:
+STRUTTURA JSON:
 {
   "numero_pratica": "",
   "tipo_fornitura": "",
@@ -666,21 +661,36 @@ Struttura JSON da restituire:
   "voci": []
 }
 
-ISTRUZIONI PER IL CAMPO "voci" (ARRAY — il più importante):
-- Scorri TUTTE le pagine e raccogli OGNI riga della tabella presidi.
-- Ogni diagnosi → un oggetto separato con tipo "DIAGNOSI".
-- Ogni presidio/riparazione → un oggetto separato con tipo "PRESIDIO".
-- NON saltare nessuna riga. NON concatenare righe diverse con ";".
-- Se il documento ha 11 presidi su 2 pagine, l'array voci deve avere 11 elementi PRESIDIO.
+═══════════════════════════════════════════════════
+REGOLA ASSOLUTA PER "voci" — LEGGI CON ATTENZIONE
+═══════════════════════════════════════════════════
 
-Formato oggetto DIAGNOSI:
-{ "tipo": "DIAGNOSI", "cod_diagnosi": "", "descrizione_diagnosi": "" }
+Il campo "voci" è un array. Ogni RIGA della tabella presidi nel documento
+deve diventare UN ELEMENTO SEPARATO dell'array.
 
-Formato oggetto PRESIDIO:
-{ "tipo": "PRESIDIO", "presidio_prescritto": "", "codice_presidio": "", "quantita": "", "prezzo_unitario": "", "iva_percentuale": "", "importo": "", "importo_iva": "" }
+ESEMPIO CORRETTO — documento con 3 righe presidio:
+"voci": [
+  { "tipo": "DIAGNOSI", "cod_diagnosi": "V49.70", "descrizione_diagnosi": "AMPUTAZIONE ARTO INFERIORE" },
+  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI ANELLO IN SILICONE", "codice_presidio": "062492784", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" },
+  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI RIVESTIMENTO TOTALE", "codice_presidio": "062492787", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" },
+  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI RIDUZIONE VOLUMETRICA", "codice_presidio": "062492790", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" }
+]
 
-Se un campo non è leggibile o assente, usa stringa vuota "".
-Restituisci SOLO il JSON, nient'altro.`;
+ESEMPIO SBAGLIATO — NON fare mai così:
+"voci": [
+  { "tipo": "PRESIDIO", "presidio_prescritto": "TUTTE LE RIPARAZIONI...", "codice_presidio": "062492784, 062492787, 062492790", "quantita": "3" }
+]
+
+REGOLE:
+1. Ogni riga della tabella = 1 oggetto separato nell'array. MAI unire righe diverse.
+2. Copia il testo della descrizione presidio esattamente come appare nel documento.
+3. Ogni codice presidio va in un oggetto separato — MAI concatenare codici con "," o ";".
+4. Cattura quantita, prezzo_unitario, iva_percentuale, importo, importo_iva da ogni riga.
+5. I presidi continuano nelle pagine successive — scorri TUTTE le pagine e raccoglili TUTTI.
+6. Se hai 11 righe presidio nel documento, l'array voci deve avere 11 oggetti PRESIDIO.
+
+Se un campo non è leggibile, usa stringa vuota "".
+Restituisci SOLO il JSON.`;
 
 // ─── MAIN FLOW ────────────────────────────────────────────────────────────────
 async function analyzeAndSave() {
