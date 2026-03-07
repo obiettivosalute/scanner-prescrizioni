@@ -635,16 +635,14 @@ CONTESTO: Ricevi da 1 a 3 immagini che sono i FOGLI STAMPATI di UN UNICO DOCUMEN
 Il tuo compito è estrarre tutti i dati e restituire UN SOLO oggetto JSON.
 
 ════════════════════════════════════════════════
-ANALISI OBBLIGATORIA IN 3 PASSI PRIMA DI RISPONDERE:
-1. Conta quante righe ha la tabella PRESIDIO PRESCRITTO su TUTTI i fogli
-2. Verifica che i tuoi campi presidio_prescritto, codice_presidio, quantita, ecc. abbiano esattamente quel numero di valori separati da |
-3. Solo allora scrivi il JSON finale
+ANALISI OBBLIGATORIA IN 4 PASSI PRIMA DI RISPONDERE:
+1. Conta quante righe ha la tabella PRESIDIO PRESCRITTO su TUTTI i fogli → N
+2. Per ogni riga leggi: descrizione, codice, QTA, PRZ.UNIT., IVA%, IMPORTO, IMPORTO+IVA
+3. Verifica che tutti i campi presidio abbiano esattamente N valori separati da |
+4. Se prezzo/importo è 0,00 scrivi "0,00" — NON lasciare vuoto, anche se sono tutti uguali
 ════════════════════════════════════════════════
 
-ESEMPIO REALE (prescrizione con 11 righe presidio su 2 fogli):
-
-Foglio 1 contiene 6 presidi, foglio 2 ne contiene 5 → totale 11.
-Il JSON corretto è:
+ESEMPIO REALE (prescrizione con 11 righe presidio su 2 fogli, prezzi tutti 0,00):
 
 {
   "numero_pratica": "40004268177",
@@ -702,9 +700,10 @@ STRUTTURA COMPLETA DEL JSON DA RESTITUIRE:
 
 REGOLE ASSOLUTE:
 - Usa | come separatore tra valori di righe diverse (MAI virgola o punto e virgola)
-- Tutti i campi presidio devono avere lo STESSO numero di | (uno per presidio)
+- Tutti i campi presidio devono avere lo STESSO numero di valori separati da |
 - Scorri OGNI FOGLIO fino all'ultima riga della tabella presidi
-- Se prezzo è 0,00 scrivi "0,00", non lasciare vuoto
+- PRZ.UNIT., IVA%, IMPORTO, IMPORTO+IVA: leggi il valore dalla tabella per ogni riga
+- Se il valore nella tabella è 0,00 scrivi "0,00" — OBBLIGATORIO, non lasciare mai vuoto
 - Restituisci SOLO il JSON, nient'altro`;
 
 // ─── MAIN FLOW ────────────────────────────────────────────────────────────────
