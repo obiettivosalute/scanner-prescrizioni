@@ -626,12 +626,11 @@ function checkReady() {
 }
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Sei un sistema OCR per moduli di prescrizione protesica della Regione Lombardia (ASST).
-Le immagini sono le PAGINE DI UN UNICO DOCUMENTO stampato su più fogli. Analizzale tutte insieme.
+const SYSTEM_PROMPT = `Sei un sistema OCR specializzato per moduli di prescrizione protesica della Regione Lombardia (ASST).
+Analizza le immagini fornite ed estrai TUTTI i campi presenti.
+Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo aggiuntivo.
 
-Restituisci SOLO un oggetto JSON valido, senza markdown, senza backtick, senza testo aggiuntivo.
-
-STRUTTURA JSON:
+I campi da estrarre (usa esattamente questi nomi come chiavi JSON):
 {
   "numero_pratica": "",
   "tipo_fornitura": "",
@@ -649,48 +648,25 @@ STRUTTURA JSON:
   "avente_diritto": "",
   "cod_diagnosi": "",
   "diagnosi": "",
-  "percorso_erogativo": "",
+  "presidio_prescritto": "",
+  "codice_presidio": "",
+  "quantita": "",
+  "prezzo_unitario": "",
+  "iva_percentuale": "",
+  "importo": "",
+  "importo_iva": "",
   "collaudo": "",
   "televisita": "",
+  "percorso_erogativo": "",
   "medico_cognome_nome": "",
   "codice_medico": "",
   "struttura_sanitaria": "",
   "codice_struttura": "",
   "data_prescrizione": "",
-  "note": "",
-  "voci": []
+  "note": ""
 }
-
-═══════════════════════════════════════════════════
-REGOLA ASSOLUTA PER "voci" — LEGGI CON ATTENZIONE
-═══════════════════════════════════════════════════
-
-Il campo "voci" è un array. Ogni RIGA della tabella presidi nel documento
-deve diventare UN ELEMENTO SEPARATO dell'array.
-
-ESEMPIO CORRETTO — documento con 3 righe presidio:
-"voci": [
-  { "tipo": "DIAGNOSI", "cod_diagnosi": "V49.70", "descrizione_diagnosi": "AMPUTAZIONE ARTO INFERIORE" },
-  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI ANELLO IN SILICONE", "codice_presidio": "062492784", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" },
-  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI RIVESTIMENTO TOTALE", "codice_presidio": "062492787", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" },
-  { "tipo": "PRESIDIO", "presidio_prescritto": "RIPARAZIONI RIDUZIONE VOLUMETRICA", "codice_presidio": "062492790", "quantita": "1", "prezzo_unitario": "0,00", "iva_percentuale": "22,00", "importo": "0,00", "importo_iva": "0,00" }
-]
-
-ESEMPIO SBAGLIATO — NON fare mai così:
-"voci": [
-  { "tipo": "PRESIDIO", "presidio_prescritto": "TUTTE LE RIPARAZIONI...", "codice_presidio": "062492784, 062492787, 062492790", "quantita": "3" }
-]
-
-REGOLE:
-1. Ogni riga della tabella = 1 oggetto separato nell'array. MAI unire righe diverse.
-2. Copia il testo della descrizione presidio esattamente come appare nel documento.
-3. Ogni codice presidio va in un oggetto separato — MAI concatenare codici con "," o ";".
-4. Cattura quantita, prezzo_unitario, iva_percentuale, importo, importo_iva da ogni riga.
-5. I presidi continuano nelle pagine successive — scorri TUTTE le pagine e raccoglili TUTTI.
-6. Se hai 11 righe presidio nel documento, l'array voci deve avere 11 oggetti PRESIDIO.
-
-Se un campo non è leggibile, usa stringa vuota "".
-Restituisci SOLO il JSON.`;
+Se un campo non è leggibile o assente, lascia il valore come stringa vuota "".
+Restituisci solo il JSON.`;
 
 // ─── MAIN FLOW ────────────────────────────────────────────────────────────────
 async function analyzeAndSave() {
@@ -762,25 +738,19 @@ async function saveToSheets(url, data) {
   const prescrizione = {};
   campiPrescrizione.forEach(k => { prescrizione[k] = data[k] || ""; });
 
-  // Usa l'array voci dal nuovo formato, con fallback al vecchio formato flat
-  let voci = [];
-  if (Array.isArray(data.voci) && data.voci.length > 0) {
-    voci = data.voci;
-  } else {
-    // Fallback: vecchio formato con campi singoli
-    if (data.diagnosi || data.cod_diagnosi) {
-      voci.push({ tipo: "DIAGNOSI", cod_diagnosi: data.cod_diagnosi || "", descrizione_diagnosi: data.diagnosi || "" });
-    }
-    if (data.presidio_prescritto) {
-      voci.push({
-        tipo: "PRESIDIO",
-        presidio_prescritto: data.presidio_prescritto || "", codice_presidio: data.codice_presidio || "",
-        quantita: data.quantita || "", nome_commerciale: data.nome_commerciale || "",
-        prezzo_unitario: data.prezzo_unitario || "", iva_percentuale: data.iva_percentuale || "",
-        importo: data.importo || "", importo_iva: data.importo_iva || "",
-        collaudo: data.collaudo || "", televisita: data.televisita || ""
-      });
-    }
+  const voci = [];
+  if (data.diagnosi || data.cod_diagnosi) {
+    voci.push({ tipo: "DIAGNOSI", cod_diagnosi: data.cod_diagnosi || "", descrizione_diagnosi: data.diagnosi || "" });
+  }
+  if (data.presidio_prescritto) {
+    voci.push({
+      tipo: "PRESIDIO",
+      presidio_prescritto: data.presidio_prescritto || "", codice_presidio: data.codice_presidio || "",
+      quantita: data.quantita || "", nome_commerciale: data.nome_commerciale || "",
+      prezzo_unitario: data.prezzo_unitario || "", iva_percentuale: data.iva_percentuale || "",
+      importo: data.importo || "", importo_iva: data.importo_iva || "",
+      collaudo: data.collaudo || "", televisita: data.televisita || ""
+    });
   }
 
   await fetch(url, {
@@ -819,20 +789,6 @@ function renderResults(data) {
   container.innerHTML = '';
   let filled = 0;
   for (const [key, val] of Object.entries(data)) {
-    if (key === 'voci' && Array.isArray(val)) {
-      if (val.length > 0) filled++;
-      const div = document.createElement('div');
-      div.className = 'result-field full';
-      let vociHtml = val.map((v, i) => {
-        const desc = v.tipo === 'DIAGNOSI'
-          ? `${v.cod_diagnosi || ''} — ${v.descrizione_diagnosi || ''}`
-          : `${v.presidio_prescritto || ''} (${v.codice_presidio || ''}) x${v.quantita || '1'}`;
-        return `<div style="margin:2px 0;padding:4px 8px;background:#f0f0f0;border-radius:4px;">${i+1}. <b>${v.tipo}</b>: ${desc}</div>`;
-      }).join('');
-      div.innerHTML = `<div class="key">voci (${val.length})</div><div class="value">${vociHtml}</div>`;
-      container.appendChild(div);
-      continue;
-    }
     if (val) filled++;
     const div = document.createElement('div');
     div.className = 'result-field' + (FULL_WIDTH_FIELDS.has(key) ? ' full' : '');
