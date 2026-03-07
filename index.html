@@ -626,11 +626,45 @@ function checkReady() {
 }
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Sei un sistema OCR specializzato per moduli di prescrizione protesica della Regione Lombardia (ASST).
-Analizza le immagini fornite ed estrai TUTTI i campi presenti.
-Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo aggiuntivo.
+const SYSTEM_PROMPT = `Sei un sistema OCR per moduli di prescrizione protesica della Regione Lombardia (ASST).
 
-I campi da estrarre (usa esattamente questi nomi come chiavi JSON):
+CONTESTO: Ricevi da 1 a 3 immagini che sono i FOGLI STAMPATI di UN UNICO DOCUMENTO.
+- Foglio 1: contiene dati anagrafici del paziente + prime righe presidio
+- Foglio 2 e 3 (se presenti): contengono ALTRE RIGHE PRESIDIO della stessa prescrizione
+
+Il tuo compito è estrarre tutti i dati e restituire UN SOLO oggetto JSON.
+
+════════════════════════════════════════════════
+ANALISI OBBLIGATORIA IN 3 PASSI PRIMA DI RISPONDERE:
+1. Conta quante righe ha la tabella PRESIDIO PRESCRITTO su TUTTI i fogli
+2. Verifica che i tuoi campi presidio_prescritto, codice_presidio, quantita, ecc. abbiano esattamente quel numero di valori separati da |
+3. Solo allora scrivi il JSON finale
+════════════════════════════════════════════════
+
+ESEMPIO REALE (prescrizione con 11 righe presidio su 2 fogli):
+
+Foglio 1 contiene 6 presidi, foglio 2 ne contiene 5 → totale 11.
+Il JSON corretto è:
+
+{
+  "numero_pratica": "40004268177",
+  "tipo_fornitura": "RIPARAZIONE",
+  "cognome": "PELLICANO'",
+  "nome": "FRANCESCO",
+  "cod_diagnosi": "V49.70",
+  "diagnosi": "LIVELLO NON SPECIFICATO DI AMPUTAZIONE DI ARTO INFERIORE",
+  "collaudo": "NO",
+  "televisita": "NO",
+  "presidio_prescritto": "RIPARAZIONI ATTACCO DI COLLEGAMENTO PER PIEDE ARTICOLATO|RIPARAZIONI GINOCCHIO POLIFUNZIONALE IN TITANIO|RIPARAZIONI CALOTTA TERMINALE PER RIVESTIMENTO|RIPARAZIONI CALZAMAGLIA DI RIVESTIMENTO|RIPARAZIONI RIFACIMENTO INVASATURA TRANSFEMORALI|RIPARAZIONI RIVESTIMENTO IN ESPANSO ELASTICO|RIPARAZIONI ANELLO IN SILICONE|RIPARAZIONI RIVESTIMENTO TOTALE CON APPOGGIO TERMINALE|RIPARAZIONI RIDUZIONE VOLUMETRICA CON LAMINAZIONE|RIPARAZIONI SOSTITUZIONE CUFFIA SISTEMA IPOBARICO|RIPARAZIONI RIFACIMENTO INVASATURA FLESSIBILE",
+  "codice_presidio": "062492130|062492424|062492718|062492721|062492772|062492778|062492784|062492787|062492790|062492817|062492826",
+  "quantita": "1|1|1|1|1|1|1|1|1|1|1",
+  "prezzo_unitario": "0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00",
+  "iva_percentuale": "22,00|22,00|22,00|22,00|22,00|22,00|22,00|22,00|22,00|22,00|22,00",
+  "importo": "0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00",
+  "importo_iva": "0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00|0,00"
+}
+
+STRUTTURA COMPLETA DEL JSON DA RESTITUIRE:
 {
   "numero_pratica": "",
   "tipo_fornitura": "",
@@ -648,25 +682,30 @@ I campi da estrarre (usa esattamente questi nomi come chiavi JSON):
   "avente_diritto": "",
   "cod_diagnosi": "",
   "diagnosi": "",
+  "percorso_erogativo": "",
+  "collaudo": "",
+  "televisita": "",
+  "medico_cognome_nome": "",
+  "codice_medico": "",
+  "struttura_sanitaria": "",
+  "codice_struttura": "",
+  "data_prescrizione": "",
+  "note": "",
   "presidio_prescritto": "",
   "codice_presidio": "",
   "quantita": "",
   "prezzo_unitario": "",
   "iva_percentuale": "",
   "importo": "",
-  "importo_iva": "",
-  "collaudo": "",
-  "televisita": "",
-  "percorso_erogativo": "",
-  "medico_cognome_nome": "",
-  "codice_medico": "",
-  "struttura_sanitaria": "",
-  "codice_struttura": "",
-  "data_prescrizione": "",
-  "note": ""
+  "importo_iva": ""
 }
-Se un campo non è leggibile o assente, lascia il valore come stringa vuota "".
-Restituisci solo il JSON.`;
+
+REGOLE ASSOLUTE:
+- Usa | come separatore tra valori di righe diverse (MAI virgola o punto e virgola)
+- Tutti i campi presidio devono avere lo STESSO numero di | (uno per presidio)
+- Scorri OGNI FOGLIO fino all'ultima riga della tabella presidi
+- Se prezzo è 0,00 scrivi "0,00", non lasciare vuoto
+- Restituisci SOLO il JSON, nient'altro`;
 
 // ─── MAIN FLOW ────────────────────────────────────────────────────────────────
 async function analyzeAndSave() {
@@ -694,7 +733,7 @@ async function analyzeAndSave() {
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: SYSTEM_PROMPT, messages: [{ role: "user", content }] })
+      body: JSON.stringify({ model: "claude-opus-4-5", max_tokens: 4000, system: SYSTEM_PROMPT, messages: [{ role: "user", content }] })
     });
     if (!resp.ok) { const err = await resp.json(); throw new Error(err.error?.message || `HTTP ${resp.status}`); }
     const data = await resp.json();
@@ -739,18 +778,42 @@ async function saveToSheets(url, data) {
   campiPrescrizione.forEach(k => { prescrizione[k] = data[k] || ""; });
 
   const voci = [];
+
+  // Diagnosi (campo singolo)
   if (data.diagnosi || data.cod_diagnosi) {
-    voci.push({ tipo: "DIAGNOSI", cod_diagnosi: data.cod_diagnosi || "", descrizione_diagnosi: data.diagnosi || "" });
-  }
-  if (data.presidio_prescritto) {
     voci.push({
-      tipo: "PRESIDIO",
-      presidio_prescritto: data.presidio_prescritto || "", codice_presidio: data.codice_presidio || "",
-      quantita: data.quantita || "", nome_commerciale: data.nome_commerciale || "",
-      prezzo_unitario: data.prezzo_unitario || "", iva_percentuale: data.iva_percentuale || "",
-      importo: data.importo || "", importo_iva: data.importo_iva || "",
-      collaudo: data.collaudo || "", televisita: data.televisita || ""
+      tipo: "DIAGNOSI",
+      cod_diagnosi: data.cod_diagnosi || "",
+      descrizione_diagnosi: data.diagnosi || ""
     });
+  }
+
+  // Presidi: espandi i campi separati da |
+  if (data.presidio_prescritto) {
+    const presidi    = (data.presidio_prescritto || "").split("|").map(s => s.trim());
+    const codici     = (data.codice_presidio     || "").split("|").map(s => s.trim());
+    const qtaArr     = (data.quantita            || "").split("|").map(s => s.trim());
+    const prezzi     = (data.prezzo_unitario     || "").split("|").map(s => s.trim());
+    const ivaArr     = (data.iva_percentuale     || "").split("|").map(s => s.trim());
+    const importi    = (data.importo             || "").split("|").map(s => s.trim());
+    const importiIva = (data.importo_iva         || "").split("|").map(s => s.trim());
+
+    for (let i = 0; i < presidi.length; i++) {
+      if (!presidi[i]) continue;
+      voci.push({
+        tipo: "PRESIDIO",
+        presidio_prescritto: presidi[i],
+        codice_presidio:     codici[i]     || "",
+        quantita:            qtaArr[i]     || "",
+        nome_commerciale:    "",
+        prezzo_unitario:     prezzi[i]     || "",
+        iva_percentuale:     ivaArr[i]     || "",
+        importo:             importi[i]    || "",
+        importo_iva:         importiIva[i] || "",
+        collaudo:            data.collaudo   || "",
+        televisita:          data.televisita || ""
+      });
+    }
   }
 
   await fetch(url, {
