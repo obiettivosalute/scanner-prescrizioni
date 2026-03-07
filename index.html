@@ -627,10 +627,16 @@ function checkReady() {
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei un sistema OCR specializzato per moduli di prescrizione protesica della Regione Lombardia (ASST).
-Analizza le immagini fornite ed estrai TUTTI i campi presenti.
-Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo aggiuntivo.
 
-I campi da estrarre (usa esattamente questi nomi come chiavi JSON):
+Le immagini che ricevi rappresentano le PAGINE DI UN UNICO DOCUMENTO (prescrizione stampata su più fogli).
+Analizzale TUTTE insieme come se fossero un documento unico continuo.
+
+REGOLE FONDAMENTALI:
+1. I dati anagrafici (paziente, medico, numero pratica) si trovano solitamente nella PRIMA pagina.
+2. L'elenco dei PRESIDI può continuare nelle pagine successive — devi raccoglierli TUTTI da TUTTE le pagine.
+3. Restituisci SEMPRE e SOLO un singolo oggetto JSON valido, senza markdown, senza backtick.
+
+Struttura JSON da restituire:
 {
   "numero_pratica": "",
   "tipo_fornitura": "",
@@ -648,25 +654,33 @@ I campi da estrarre (usa esattamente questi nomi come chiavi JSON):
   "avente_diritto": "",
   "cod_diagnosi": "",
   "diagnosi": "",
-  "presidio_prescritto": "",
-  "codice_presidio": "",
-  "quantita": "",
-  "prezzo_unitario": "",
-  "iva_percentuale": "",
-  "importo": "",
-  "importo_iva": "",
+  "percorso_erogativo": "",
   "collaudo": "",
   "televisita": "",
-  "percorso_erogativo": "",
   "medico_cognome_nome": "",
   "codice_medico": "",
   "struttura_sanitaria": "",
   "codice_struttura": "",
   "data_prescrizione": "",
-  "note": ""
+  "note": "",
+  "voci": []
 }
-Se un campo non è leggibile o assente, lascia il valore come stringa vuota "".
-Restituisci solo il JSON.`;
+
+ISTRUZIONI PER IL CAMPO "voci" (ARRAY — il più importante):
+- Scorri TUTTE le pagine e raccogli OGNI riga della tabella presidi.
+- Ogni diagnosi → un oggetto separato con tipo "DIAGNOSI".
+- Ogni presidio/riparazione → un oggetto separato con tipo "PRESIDIO".
+- NON saltare nessuna riga. NON concatenare righe diverse con ";".
+- Se il documento ha 11 presidi su 2 pagine, l'array voci deve avere 11 elementi PRESIDIO.
+
+Formato oggetto DIAGNOSI:
+{ "tipo": "DIAGNOSI", "cod_diagnosi": "", "descrizione_diagnosi": "" }
+
+Formato oggetto PRESIDIO:
+{ "tipo": "PRESIDIO", "presidio_prescritto": "", "codice_presidio": "", "quantita": "", "prezzo_unitario": "", "iva_percentuale": "", "importo": "", "importo_iva": "" }
+
+Se un campo non è leggibile o assente, usa stringa vuota "".
+Restituisci SOLO il JSON, nient'altro.`;
 
 // ─── MAIN FLOW ────────────────────────────────────────────────────────────────
 async function analyzeAndSave() {
@@ -738,19 +752,25 @@ async function saveToSheets(url, data) {
   const prescrizione = {};
   campiPrescrizione.forEach(k => { prescrizione[k] = data[k] || ""; });
 
-  const voci = [];
-  if (data.diagnosi || data.cod_diagnosi) {
-    voci.push({ tipo: "DIAGNOSI", cod_diagnosi: data.cod_diagnosi || "", descrizione_diagnosi: data.diagnosi || "" });
-  }
-  if (data.presidio_prescritto) {
-    voci.push({
-      tipo: "PRESIDIO",
-      presidio_prescritto: data.presidio_prescritto || "", codice_presidio: data.codice_presidio || "",
-      quantita: data.quantita || "", nome_commerciale: data.nome_commerciale || "",
-      prezzo_unitario: data.prezzo_unitario || "", iva_percentuale: data.iva_percentuale || "",
-      importo: data.importo || "", importo_iva: data.importo_iva || "",
-      collaudo: data.collaudo || "", televisita: data.televisita || ""
-    });
+  // Usa l'array voci dal nuovo formato, con fallback al vecchio formato flat
+  let voci = [];
+  if (Array.isArray(data.voci) && data.voci.length > 0) {
+    voci = data.voci;
+  } else {
+    // Fallback: vecchio formato con campi singoli
+    if (data.diagnosi || data.cod_diagnosi) {
+      voci.push({ tipo: "DIAGNOSI", cod_diagnosi: data.cod_diagnosi || "", descrizione_diagnosi: data.diagnosi || "" });
+    }
+    if (data.presidio_prescritto) {
+      voci.push({
+        tipo: "PRESIDIO",
+        presidio_prescritto: data.presidio_prescritto || "", codice_presidio: data.codice_presidio || "",
+        quantita: data.quantita || "", nome_commerciale: data.nome_commerciale || "",
+        prezzo_unitario: data.prezzo_unitario || "", iva_percentuale: data.iva_percentuale || "",
+        importo: data.importo || "", importo_iva: data.importo_iva || "",
+        collaudo: data.collaudo || "", televisita: data.televisita || ""
+      });
+    }
   }
 
   await fetch(url, {
@@ -789,6 +809,20 @@ function renderResults(data) {
   container.innerHTML = '';
   let filled = 0;
   for (const [key, val] of Object.entries(data)) {
+    if (key === 'voci' && Array.isArray(val)) {
+      if (val.length > 0) filled++;
+      const div = document.createElement('div');
+      div.className = 'result-field full';
+      let vociHtml = val.map((v, i) => {
+        const desc = v.tipo === 'DIAGNOSI'
+          ? `${v.cod_diagnosi || ''} — ${v.descrizione_diagnosi || ''}`
+          : `${v.presidio_prescritto || ''} (${v.codice_presidio || ''}) x${v.quantita || '1'}`;
+        return `<div style="margin:2px 0;padding:4px 8px;background:#f0f0f0;border-radius:4px;">${i+1}. <b>${v.tipo}</b>: ${desc}</div>`;
+      }).join('');
+      div.innerHTML = `<div class="key">voci (${val.length})</div><div class="value">${vociHtml}</div>`;
+      container.appendChild(div);
+      continue;
+    }
     if (val) filled++;
     const div = document.createElement('div');
     div.className = 'result-field' + (FULL_WIDTH_FIELDS.has(key) ? ' full' : '');
